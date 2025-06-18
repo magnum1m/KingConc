@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Network Forwarding Table Generator</title>
+  <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; display: flex; height: 100vh; }
+    #cy { flex: 1; position: relative; }
+    #panel { width: 300px; padding: 1em; overflow-y: auto; }
+    h2 { margin-top: 0; }
+    button, select { width: 100%; margin-bottom: 0.5em; padding: 0.5em; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 0.25em; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="cy"></div>
+  <div id="panel">
+    <h2>Controls</h2>
+    <button id="add-node">Add Node</button>
+    <button id="delete-node">Delete Node</button>
+    <button id="add-edge">Add/Edit Edge</button>
+    <button id="delete-edge">Delete Edge</button>
+    <select id="src-node"><option value="">Select Source</option></select>
+    <button id="compute">Compute Forwarding Table</button>
+    <h2>Forwarding Table</h2>
+    <table id="ftable">
+      <thead><tr><th>Destination</th><th>Next Hop</th><th>Cost</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const cy = cytoscape({
+      container: document.getElementById('cy'),
+      style: [
+        { selector: 'node', style: { 'label': 'data(id)', 'width': 40, 'height': 40, 'background-color': '#66ccff' } },
+        { selector: 'edge', style: { 'label': 'data(weight)', 'curve-style': 'bezier', 'target-arrow-shape': 'none' } }
+      ],
+      layout: { name: 'preset' }
+    });
+
+    let nextCharCode = 65; // 'A'
+    function getNextNodeId() {
+      const id = String.fromCharCode(nextCharCode);
+      nextCharCode++;
+      return id;
+    }
+
+    function refreshSrcOptions() {
+      const sel = document.getElementById('src-node');
+      sel.innerHTML = '<option value="">Select Source</option>' +
+        cy.nodes().map(n => `<option value="${n.id()}">${n.id()}</option>`).join('');
+    }
+
+    document.getElementById('add-node').addEventListener('click', () => {
+      const id = getNextNodeId();
+      const container = cy.container();
+      const rect = container.getBoundingClientRect();
+      const posX = rect.width / 2;
+      const posY = rect.height / 2;
+      cy.add({
+        group: 'nodes',
+        data: { id },
+        position: { x: posX, y: posY }
+      });
+      refreshSrcOptions();
+    });
+
+    document.getElementById('delete-node').addEventListener('click', () => {
+      const id = prompt('Node ID to delete:');
+      const node = cy.getElementById(id);
+      if (node.length) {
+        cy.remove(node);
+        refreshSrcOptions();
+      }
+    });
+
+    document.getElementById('add-edge').addEventListener('click', () => {
+      const src = prompt('Source node ID:');
+      const tgt = prompt('Target node ID:');
+      const w = parseFloat(prompt('Weight:', '1'));
+      if (cy.getElementById(src).length && cy.getElementById(tgt).length && !isNaN(w)) {
+        const id = `${src}_${tgt}`;
+        const rid = `${tgt}_${src}`;
+        cy.remove(`#${id}, #${rid}`);
+        cy.add({ group: 'edges', data: { id, source: src, target: tgt, weight: w } });
+        cy.add({ group: 'edges', data: { id: rid, source: tgt, target: src, weight: w } });
+      } else alert('Invalid nodes or weight');
+    });
+
+    document.getElementById('delete-edge').addEventListener('click', () => {
+      const src = prompt('Edge source node ID:');
+      const tgt = prompt('Edge target node ID:');
+      const id = `${src}_${tgt}`;
+      const rid = `${tgt}_${src}`;
+      const e = cy.getElementById(id);
+      if (e.length) {
+        cy.remove(`#${id}, #${rid}`);
+      } else alert('Edge not found');
+    });
+
+    document.getElementById('compute').addEventListener('click', () => {
+      const src = document.getElementById('src-node').value;
+      if (!src) return alert('Select source node');
+      const dist = {}, prev = {}, visited = {};
+      cy.nodes().forEach(n => { dist[n.id()] = Infinity; prev[n.id()] = null; visited[n.id()] = false; });
+      dist[src] = 0;
+      while (true) {
+        let u = null, min = Infinity;
+        Object.keys(dist).forEach(k => { if (!visited[k] && dist[k] < min) { min = dist[k]; u = k; } });
+        if (u === null) break;
+        visited[u] = true;
+        cy.getElementById(u).connectedEdges().filter(e => e.data('source') === u).forEach(e => {
+          const v = e.data('target'), w = e.data('weight');
+          if (!visited[v] && dist[u] + w < dist[v]) { dist[v] = dist[u] + w; prev[v] = u; }
+        });
+      }
+      const tbody = document.querySelector('#ftable tbody'); tbody.innerHTML = '';
+      cy.nodes().forEach(n => {
+        const d = n.id(); if (d === src) return;
+        let hop = d;
+        while (prev[hop] && prev[hop] !== src) hop = prev[hop];
+        const next = prev[hop] === src ? hop : hop;
+        const cost = dist[d] === Infinity ? '∞' : dist[d].toFixed(2);
+        tbody.insertAdjacentHTML('beforeend', `<tr><td>${d}</td><td>${next||'-'}</td><td>${cost}</td></tr>`);
+      });
+    });
+
+    refreshSrcOptions();
+  </script>
+</body>
+</html>
