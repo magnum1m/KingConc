@@ -1,8 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Primary Meta Tags -->
   <meta charset="UTF-8">
-  <title>Priority Scheduler Simulator</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Priority Scheduler Simulator | Thread Scheduling Demo</title>
+  <meta name="description" content="Interactive simulator for thread priority scheduling, locks, and priority inheritance. Visualize run, sleep, lock, unlock, and terminate operations in real-time.">
+  <meta name="keywords" content="Priority Scheduler, Thread Scheduling, Priority Inheritance, Mutex Simulator, Concurrency Demo, OS Scheduler">
+  <link rel="canonical" href="https://example.com/priority-scheduler-simulator">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7994784937767143"
+       crossorigin="anonymous"></script>
+  
+  <!-- Optional: Google Analytics -->
+  <!-- <script async src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'GA_MEASUREMENT_ID');
+  </script> -->
+
   <style>
     body { font-family: Arial, sans-serif; margin: 2em; }
     textarea { width: 100%; height: 120px; font-family: monospace; }
@@ -13,127 +31,89 @@
   </style>
 </head>
 <body>
-  <h1>Priority Scheduler Simulator</h1>
-  <p>Enter each thread on its own line in the format:<br>
-     <code>priority: instr1; instr2; ...</code><br>
-     Supported instructions: <code>sleep N</code>, <code>run N</code>, <code>lock</code>, <code>unlock</code>, <code>terminate</code>.<br>
-     <strong>Atomic instructions (sleep/lock/unlock/terminate) cost no time; only <code>run</code> consumes CPU.</strong></p>
-  <textarea id="input" placeholder="high: sleep 4; lock; terminate
+  <header>
+    <h1>Priority Scheduler Simulator</h1>
+    <p>Visualize thread scheduling with priorities, mutex locks, and priority inheritance.</p>
+  </header>
+
+  <main>
+    <section aria-labelledby="instructions">
+      <h2 id="instructions">How to Use</h2>
+      <p>Enter each thread on its own line in the format:</p>
+      <pre><code>high: sleep 4; lock; terminate
+medium: run 3; sleep 1; run 3
+low: lock; run 1; unlock</code></pre>
+      <p><strong>Note:</strong> Only <code>run</code> consumes CPU time; other commands are atomic.</p>
+    </section>
+
+    <section aria-labelledby="simulator">
+      <h2 id="simulator">Simulator</h2>
+      <textarea id="input" placeholder="high: sleep 4; lock; terminate
 medium: run 3; sleep 1; run 3
 low: lock; run 1; unlock"></textarea>
-  <div class="controls">
-    <label><input type="checkbox" id="offset" checked> Assume start at second 1 (subtract 1)</label>
-    <label><input type="checkbox" id="inherit"> Enable priority inheritance</label>
-  </div>
-  <button id="run">Run Simulation</button>
-  <div id="result"></div>
+      <div class="controls">
+        <label><input type="checkbox" id="offset" checked> Start at second 1 (offset on)</label>
+        <label><input type="checkbox" id="inherit"> Enable priority inheritance</label>
+      </div>
+      <button id="run">Run Simulation</button>
+      <div id="result" aria-live="polite"></div>
+    </section>
+  </main>
 
   <script>
     document.getElementById('run').addEventListener('click', () => {
       const text = document.getElementById('input').value;
       const lines = text.split('\n').map(l => l.trim()).filter(l => l && l.includes(':'));
-      if (!lines.length) {
-        document.getElementById('result').innerText = 'No valid thread definitions found.';
-        return;
-      }
-
-      // Parse threads
+      if (!lines.length) { document.getElementById('result').innerText = 'No valid definitions.'; return; }
       const threads = lines.map(line => {
         const [pri, rest] = line.split(/:(.+)/);
-        const instrTokens = rest.split(';').map(s => s.trim()).filter(Boolean);
-        const instr = instrTokens.map(tok => {
+        const instr = rest.split(';').map(s => s.trim()).filter(Boolean).map(tok => {
           const [cmd, arg] = tok.split(/\s+/);
           return cmd === 'sleep' || cmd === 'run'
             ? { cmd, time: parseInt(arg, 10) }
             : { cmd };
         });
-        return {
-          priority: pri.trim(),
-          origPri: null,
-          instr,
-          pc: 0,
-          state: 'ready',
-          rem: 0,
-          wake: 0,
-          priNum: 0
-        };
+        return { priority: pri.trim(), origPri: null, instr, pc: 0, state: 'ready', rem: 0, wake: 0, priNum: 0 };
       });
-
-      // Assign numeric priorities
       threads.forEach(t => {
         const p = t.priority.toLowerCase();
         t.priNum = p === 'high' ? 3 : p === 'medium' ? 2 : p === 'low' ? 1 : parseInt(t.priority, 10) || 0;
       });
-
       const enableInheritance = document.getElementById('inherit').checked;
       let time = 1, result = null, mutexOwner = null;
       const MAX = 10000;
-
       while (time < MAX && result === null) {
-        // Wake sleeping threads
-        threads.forEach(t => {
-          if (t.state === 'sleeping' && t.wake <= time) t.state = 'ready';
-        });
-
-        // Select highest-priority runnable thread
-        const cand = threads
-          .filter(t => (t.state === 'ready' || (t.state === 'running' && t.rem > 0)) && t.pc < t.instr.length)
+        threads.forEach(t => { if (t.state === 'sleeping' && t.wake <= time) t.state = 'ready'; });
+        const cand = threads.filter(t => (t.state === 'ready' || (t.state === 'running' && t.rem > 0)) && t.pc < t.instr.length)
           .sort((a, b) => b.priNum - a.priNum);
         if (!cand.length) { time++; continue; }
-        const t = cand[0];
-        const ins = t.instr[t.pc];
-
+        const t = cand[0], ins = t.instr[t.pc];
         if (ins.cmd === 'run') {
-          // consume 1s of CPU
-          if (t.rem === 0) t.rem = ins.time;
-          t.rem--;
-          t.state = t.rem > 0 ? 'running' : 'ready';
-          if (t.rem === 0) t.pc++;
+          if (!t.rem) t.rem = ins.time;
+          t.rem--; t.state = t.rem ? 'running' : 'ready'; if (!t.rem) t.pc++;
           time++;
-
         } else if (ins.cmd === 'sleep') {
-          t.state = 'sleeping';
-          t.wake = time + ins.time;
-          t.pc++;
-          // atomic
-
+          t.state = 'sleeping'; t.wake = time + ins.time; t.pc++;
         } else if (ins.cmd === 'lock') {
-          if (mutexOwner === null) {
-            mutexOwner = t;
-            t.pc++;
-          } else {
-            // blocking: apply priority inheritance if enabled
-            t.state = 'blocked';
+          if (mutexOwner === null) { mutexOwner = t; t.pc++; }
+          else { t.state = 'blocked';
             if (enableInheritance && mutexOwner.priNum < t.priNum) {
-              // donate
               if (mutexOwner.origPri === null) mutexOwner.origPri = mutexOwner.priNum;
               mutexOwner.priNum = t.priNum;
             }
           }
-          // atomic
-
         } else if (ins.cmd === 'unlock') {
           if (mutexOwner === t) {
-            // restore donated priority
-            if (enableInheritance && t.origPri !== null) {
-              t.priNum = t.origPri;
-              t.origPri = null;
-            }
+            if (enableInheritance && t.origPri !== null) { t.priNum = t.origPri; t.origPri = null; }
             mutexOwner = null;
           }
-          t.pc++;
-          threads.forEach(x => { if (x.state === 'blocked') x.state = 'ready'; });
-          // atomic
-
-        } else if (ins.cmd === 'terminate') {
-          result = time;
-          break;
-        }
+          t.pc++; threads.forEach(x => x.state === 'blocked' && (x.state = 'ready'));
+        } else if (ins.cmd === 'terminate') { result = time; break; }
       }
-
       if (document.getElementById('offset').checked && result !== null) result--;
-      document.getElementById('result').innerText =
-        result !== null ? 'Program terminates at second ' + result : 'Simulation timed out';
+      document.getElementById('result').innerText = result !== null
+        ? 'Program terminates at second ' + result
+        : 'Simulation timed out';
     });
   </script>
 </body>
